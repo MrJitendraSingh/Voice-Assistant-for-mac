@@ -1,0 +1,21 @@
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Local database
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Local configuration / secrets
+.env
+*.secret

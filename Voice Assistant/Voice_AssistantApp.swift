@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct Voice_AssistantApp: App {
+    
+    private let databaseManager = DatabaseManager()
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(databaseManager : databaseManager)
         }
     }
 }
