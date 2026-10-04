@@ -2,17 +2,37 @@ import SwiftUI
 
 struct ContentView: View {
 
+    // MARK: - Dependencies
+
     private let databaseManager: DatabaseManager
     private let conversationManager: ConversationManager
 
-    @State private var speechService = SpeechService()
-    @State private var isListening = false
-    @State private var recognizedText = ""
-    @State private var assistantResponse = ""
-    @State private var isThinking = false
-
     private let ollama = OllamaClient()
     private let tts = TTSService()
+
+    // MARK: - Services
+
+    @State private var speechService = SpeechService()
+
+    // MARK: - UI State
+
+    @State private var isListening = false
+    @State private var isThinking = false
+
+    @State private var recognizedText = ""
+    @State private var inputText = ""
+
+    @State private var assistantResponse = ""
+
+    @State private var messages: [ChatMessage] = []
+
+    @State private var conversations: [
+        SidebarConversation
+    ] = []
+
+    @State private var selectedConversationId: Int64?
+
+    // MARK: - Init
 
     init(databaseManager: DatabaseManager) {
 
@@ -24,108 +44,334 @@ struct ContentView: View {
             )
     }
 
+    // MARK: - Body
+
     var body: some View {
 
-        VStack(spacing: 20) {
+        NavigationSplitView {
 
-            Text("Voice Assistant")
-                .font(.largeTitle)
-                .bold()
-
-            Text(
-                recognizedText.isEmpty
-                ? "Press Start and speak"
-                : recognizedText
+            SidebarView(
+                conversations: conversations,
+                selectedConversationId:
+                    $selectedConversationId,
+                onNewConversation:
+                    startNewConversation
             )
-            .frame(minWidth: 400, minHeight: 80)
-            .padding()
-            .background(.gray.opacity(0.1))
-            .cornerRadius(12)
 
-            Text(
-                isThinking
-                ? "Voice Assistant is thinking..."
-                : (
-                    assistantResponse.isEmpty
-                    ? "Response will appear here"
-                    : assistantResponse
+        } detail: {
+
+            VStack(spacing: 0) {
+
+                ChatView(
+                    messages: messages,
+                    isThinking: isThinking
                 )
-            )
-            .frame(minWidth: 400, minHeight: 80)
-            .padding()
-            .background(.blue.opacity(0.08))
-            .cornerRadius(12)
 
-            Button(
-                isListening
-                ? "Stop Listening"
-                : "Start Listening"
-            ) {
-
-                if isListening {
-
-                    speechService.stopListening()
-                    isListening = false
-
-                } else {
-
-                    recognizedText = ""
-                    assistantResponse = ""
-
-                    speechService.startListening()
-                    isListening = true
-                }
+                ComposerView(
+                    text: $inputText,
+                    isListening: isListening,
+                    isThinking: isThinking,
+                    onMicrophoneTap:
+                        toggleListening,
+                    onSend:
+                        sendTextMessage
+                )
             }
-            .buttonStyle(.borderedProminent)
         }
-        .padding(40)
+        .frame(
+            minWidth: 900,
+            minHeight: 650
+        )
         .onAppear {
-            if conversationManager.currentConversationId == nil {
-                conversationManager.startConversation(
-                    title: "Voice Assistant"
-                )
+            setupAssistant()
+        }
+        .onChange(of: selectedConversationId) { _, newConversationId in
+
+            guard let conversationId = newConversationId else {
+                return
             }
-            speechService.requestPermissions()
 
-            speechService.onFinalText = { text in
+            loadMessages(
+                for: conversationId
+            )
+        }
+    }
 
-                DispatchQueue.main.async {
+    // MARK: - Setup
 
-                    recognizedText = text
-                    isListening = false
-                    isThinking = true
-                }
+    private func setupAssistant() {
 
-                ollama.ask(text) { result in
+        speechService.requestPermissions()
 
-                    DispatchQueue.main.async {
+        speechService.onFinalText = { text in
 
-                        isThinking = false
+            handleRecognizedText(text)
+        }
 
-                        switch result {
+        // Load existing conversations from SQLite.
+        let storedConversations =
+            conversationManager.fetchConversations()
 
-                        case .success(let response):
+        conversations = storedConversations
 
-                            assistantResponse = response
+        if let firstConversation = storedConversations.first {
 
-                            print(
-                                "ASSISTANT_RESPONSE: \(response)"
-                            )
+            selectedConversationId =
+                firstConversation.id
 
-                            tts.speak(response)
+            conversationManager.resumeConversation(
+                id: firstConversation.id
+            )
 
-                        case .failure(let error):
+            loadMessages(
+                for: firstConversation.id
+            )
 
-                            assistantResponse =
-                                "Sorry, I couldn't connect to the voice assistant."
+            print(
+                "CONVERSATION_RESUMED: \(firstConversation.id)"
+            )
 
-                            print(
-                                "OLLAMA_ERROR: \(error)"
-                            )
-                        }
+        } else {
+
+            if let id =
+                conversationManager.startConversation(
+                    title: "New Conversation"
+                ) {
+
+                selectedConversationId = id
+
+                conversations =
+                    conversationManager.fetchConversations()
+            }
+        }
+    }
+
+    // MARK: - Microphone
+
+    private func toggleListening() {
+
+        if isListening {
+
+            speechService.stopListening()
+
+            isListening = false
+
+        } else {
+
+            recognizedText = ""
+
+            speechService.startListening()
+
+            isListening = true
+        }
+    }
+
+    // MARK: - Recognized Speech
+
+    private func handleRecognizedText(
+        _ text: String
+    ) {
+
+        DispatchQueue.main.async {
+
+            recognizedText = text
+
+            inputText = ""
+
+            isListening = false
+
+            isThinking = true
+
+            sendToAssistant(text)
+        }
+    }
+
+    // MARK: - Text Message
+
+    private func sendTextMessage() {
+
+        let text =
+            inputText.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+
+        guard !text.isEmpty else {
+            return
+        }
+
+        inputText = ""
+
+        sendToAssistant(text)
+    }
+
+    // MARK: - Send To Assistant
+
+    private func sendToAssistant(
+        _ text: String
+    ) {
+
+        let trimmedText =
+            text.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+
+        guard !trimmedText.isEmpty else {
+            return
+        }
+
+        guard let conversationId =
+                selectedConversationId
+        else {
+
+            print(
+                "OLLAMA_ERROR: No selected conversation"
+            )
+
+            return
+        }
+
+        // Build context BEFORE saving the new user message.
+        // This prevents the new prompt from being sent twice.
+        let context =
+            conversationManager.buildOllamaContext(
+                for: conversationId
+            )
+
+        // Show the user message immediately in the UI.
+        messages.append(
+            ChatMessage(
+                role: .user,
+                text: trimmedText
+            )
+        )
+
+        inputText = ""
+
+        isThinking = true
+
+        print(
+            "OLLAMA_CONTEXT_MESSAGES: \(context.count)"
+        )
+
+        ollama.ask(
+            trimmedText,
+            context: context
+        ) { result in
+
+            DispatchQueue.main.async {
+
+                switch result {
+
+                case .success(let response):
+
+                    isThinking = false
+
+                    // Save user message.
+                    let userSaved =
+                        conversationManager.saveUserMessage(
+                            trimmedText
+                        )
+
+                    if !userSaved {
+
+                        print(
+                            "DATABASE_ERROR: Failed to save user message"
+                        )
                     }
+
+                    // Show assistant response.
+                    messages.append(
+                        ChatMessage(
+                            role: .assistant,
+                            text: response
+                        )
+                    )
+
+                    assistantResponse = response
+
+                    print(
+                        "ASSISTANT_RESPONSE: \(response)"
+                    )
+
+                    // Save assistant response.
+                    let assistantSaved =
+                        conversationManager
+                            .saveAssistantMessage(
+                                response
+                            )
+
+                    if !assistantSaved {
+
+                        print(
+                            "DATABASE_ERROR: Failed to save assistant response"
+                        )
+                    }
+
+                    // Speak response.
+                    tts.speak(response)
+
+                case .failure(let error):
+
+                    isThinking = false
+
+                    let errorMessage =
+                        "Sorry, I couldn't connect to the voice assistant."
+
+                    messages.append(
+                        ChatMessage(
+                            role: .assistant,
+                            text: errorMessage
+                        )
+                    )
+
+                    print(
+                        "OLLAMA_ERROR: \(error)"
+                    )
                 }
             }
         }
     }
+
+    // MARK: - New Conversation
+
+    private func startNewConversation() {
+
+        messages.removeAll()
+
+        inputText = ""
+
+        recognizedText = ""
+
+        assistantResponse = ""
+
+        isThinking = false
+
+        if let id =
+            conversationManager.startConversation(
+                title: "New Conversation"
+            ) {
+
+            selectedConversationId = id
+        
+        }
+    }
+    
+    // MARK: - Load Messages
+
+    private func loadMessages(
+        for conversationId: Int64
+    ) {
+
+        let storedMessages =
+            conversationManager.fetchMessages(
+                for: conversationId
+            )
+
+        messages = storedMessages
+
+        print(
+            "UI_MESSAGES_LOADED: \(storedMessages.count)"
+        )
+    }
+    
 }

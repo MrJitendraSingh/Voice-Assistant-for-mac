@@ -12,6 +12,19 @@ final class ConversationManager {
 
     private(set) var currentConversationId:
         Int64?
+    
+    // MARK: - Resume Conversation
+
+    func resumeConversation(
+        id: Int64
+    ) {
+
+        currentConversationId = id
+
+        print(
+            "CURRENT_CONVERSATION_RESUMED: \(id)"
+        )
+    }
 
     init(databaseManager: DatabaseManager) {
 
@@ -101,5 +114,96 @@ final class ConversationManager {
             role: "assistant",
             content: text
         )
+    }
+    
+    // MARK: - Fetch Conversations
+
+    func fetchConversations() -> [SidebarConversation] {
+
+        let conversations =
+            conversationRepository.fetchConversations()
+
+        print(
+            "CONVERSATION_MANAGER_FETCHED: \(conversations.count)"
+        )
+
+        return conversations
+    }
+    
+    // MARK: - Fetch Messages
+
+    func fetchMessages(
+        for conversationId: Int64
+    ) -> [ChatMessage] {
+
+        let messages =
+            messageRepository.fetchMessages(
+                conversationId: conversationId
+            )
+
+        print(
+            "CONVERSATION_MANAGER_MESSAGES_FETCHED: \(messages.count)"
+        )
+
+        return messages
+    }
+    
+    // MARK: - Build Ollama Context
+
+    func buildOllamaContext(
+        for conversationId: Int64
+    ) -> [[String: String]] {
+
+        let storedMessages =
+            messageRepository.fetchMessages(
+                conversationId: conversationId
+            )
+
+        var context: [[String: String]] = [
+
+            [
+                "role": "system",
+                "content": """
+                You are a local personal voice assistant.
+
+                Rules:
+
+                - Be natural and conversational.
+                - Keep responses reasonably short.
+                - Do not use markdown unless necessary.
+                - Do not use emojis.
+                - Respond in the same language as the user.
+                - If the user speaks Hinglish, respond in Hinglish.
+                - Never claim you performed an action unless the application actually performed it.
+                """
+            ]
+        ]
+
+        for message in storedMessages {
+
+            let role: String
+
+            switch message.role {
+
+            case .user:
+                role = "user"
+
+            case .assistant:
+                role = "assistant"
+            }
+
+            context.append(
+                [
+                    "role": role,
+                    "content": message.text
+                ]
+            )
+        }
+
+        print(
+            "OLLAMA_CONTEXT_BUILT: \(context.count) messages"
+        )
+
+        return context
     }
 }

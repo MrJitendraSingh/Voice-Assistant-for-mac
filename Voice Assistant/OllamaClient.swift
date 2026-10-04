@@ -7,37 +7,28 @@ final class OllamaClient {
 
     private let model = "qwen3:4b"
 
-    private var messages: [[String: String]] = [
-
-        [
-            "role": "system",
-            "content": """
-            You are a local personal voice assistant.
-
-            Rules:
-
-            - Be natural and conversational.
-            - Keep responses reasonably short.
-            - Do not use markdown unless necessary.
-            - Do not use emojis.
-            - Respond in the same language as the user.
-            - If the user speaks Hinglish, respond in Hinglish.
-            - Never claim you performed an action unless the application actually performed it.
-            """
-        ]
-    ]
+    // MARK: - Ask
 
     func ask(
         _ prompt: String,
+        context: [[String: String]],
         completion: @escaping (Result<String, Error>) -> Void
     ) {
 
-        messages.append([
-            "role": "user",
-            "content": prompt
-        ])
+        var messages = context
 
-        var request = URLRequest(url: endpoint)
+        // Add the new user message to the selected
+        // conversation context.
+        messages.append(
+            [
+                "role": "user",
+                "content": prompt
+            ]
+        )
+
+        var request = URLRequest(
+            url: endpoint
+        )
 
         request.httpMethod = "POST"
 
@@ -64,17 +55,23 @@ final class OllamaClient {
 
         } catch {
 
-            completion(.failure(error))
+            completion(
+                .failure(error)
+            )
+
             return
         }
 
         URLSession.shared.dataTask(
             with: request
-        ) { [weak self] data, response, error in
+        ) { data, response, error in
 
             if let error = error {
 
-                completion(.failure(error))
+                completion(
+                    .failure(error)
+                )
+
                 return
             }
 
@@ -105,10 +102,12 @@ final class OllamaClient {
 
                 guard
                     let message =
-                        json?["message"] as? [String: Any],
+                        json?["message"]
+                            as? [String: Any],
 
                     let content =
-                        message["content"] as? String
+                        message["content"]
+                            as? String
 
                 else {
 
@@ -126,12 +125,6 @@ final class OllamaClient {
                     content.trimmingCharacters(
                         in: .whitespacesAndNewlines
                     )
-
-                // Store the response for conversation context.
-                self?.messages.append([
-                    "role": "assistant",
-                    "content": responseText
-                ])
 
                 completion(
                     .success(responseText)

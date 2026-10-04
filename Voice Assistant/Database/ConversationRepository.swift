@@ -81,4 +81,90 @@ final class ConversationRepository {
 
         return id
     }
+    
+    // MARK: - Fetch Conversations
+
+    func fetchConversations() -> [
+        SidebarConversation
+    ] {
+
+        let sql = """
+        SELECT
+            id,
+            title,
+            updated_at
+        FROM conversations
+        ORDER BY updated_at DESC;
+        """
+
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(
+            database,
+            sql,
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK else {
+
+            print(
+                "ERROR_PREPARING_FETCH_CONVERSATIONS"
+            )
+
+            return []
+        }
+
+        defer {
+            sqlite3_finalize(statement)
+        }
+
+        var conversations: [
+            SidebarConversation
+        ] = []
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+
+            let id =
+                sqlite3_column_int64(
+                    statement,
+                    0
+                )
+
+            let titlePointer =
+                sqlite3_column_text(
+                    statement,
+                    1
+                )
+
+            let updatedAt =
+                sqlite3_column_double(
+                    statement,
+                    2
+                )
+
+            let title =
+                titlePointer != nil
+                ? String(
+                    cString: titlePointer!
+                )
+                : "Untitled Conversation"
+
+            conversations.append(
+                SidebarConversation(
+                    id: id,
+                    title: title,
+                    date: Date(
+                        timeIntervalSince1970:
+                            updatedAt
+                    )
+                )
+            )
+        }
+
+        print(
+            "CONVERSATIONS_FETCHED: \(conversations.count)"
+        )
+
+        return conversations
+    }
 }

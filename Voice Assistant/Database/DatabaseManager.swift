@@ -100,6 +100,15 @@ final class DatabaseManager {
             return
         }
 
+        // Enable foreign key support.
+        sqlite3_exec(
+            database,
+            "PRAGMA foreign_keys = ON;",
+            nil,
+            nil,
+            nil
+        )
+
         let sql = """
         CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,44 +130,42 @@ final class DatabaseManager {
         );
         """
 
-        var statement: OpaquePointer?
+        var errorMessage: UnsafeMutablePointer<CChar>?
 
-        guard sqlite3_prepare_v2(
+        let result = sqlite3_exec(
             database,
             sql,
-            -1,
-            &statement,
-            nil
-        ) == SQLITE_OK else {
+            nil,
+            nil,
+            &errorMessage
+        )
 
-            print(
-                "DATABASE_ERROR: Failed to prepare table creation"
-            )
+        if result == SQLITE_OK {
 
-            return
-        }
+            print("DATABASE_TABLES_READY")
 
-        defer {
-            sqlite3_finalize(statement)
-        }
+        } else {
 
-        guard sqlite3_step(statement) == SQLITE_DONE else {
+            if let errorMessage = errorMessage {
 
-            let errorMessage =
-                String(
-                    cString: sqlite3_errmsg(database)
+                let message =
+                    String(cString: errorMessage)
+
+                print(
+                    "DATABASE_TABLE_ERROR: \(message)"
                 )
 
-            print(
-                "DATABASE_ERROR: \(errorMessage)"
-            )
+                sqlite3_free(errorMessage)
 
-            return
+            } else {
+
+                print(
+                    "DATABASE_TABLE_ERROR: Unknown error"
+                )
+            }
         }
-
-        print("DATABASE_TABLES_READY")
     }
-
+    
     // MARK: - Close Database
 
     private func closeDatabase() {

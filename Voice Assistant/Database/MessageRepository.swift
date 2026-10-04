@@ -102,4 +102,111 @@ final class MessageRepository {
 
         return true
     }
+    
+    
+    // MARK: - Fetch Messages
+
+    func fetchMessages(
+        conversationId: Int64
+    ) -> [ChatMessage] {
+
+        let sql = """
+        SELECT
+            id,
+            role,
+            content
+        FROM messages
+        WHERE conversation_id = ?
+        ORDER BY created_at ASC, id ASC;
+        """
+
+        var statement: OpaquePointer?
+
+        guard sqlite3_prepare_v2(
+            database,
+            sql,
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK else {
+
+            print(
+                "ERROR_PREPARING_FETCH_MESSAGES"
+            )
+
+            return []
+        }
+
+        defer {
+            sqlite3_finalize(statement)
+        }
+
+        sqlite3_bind_int64(
+            statement,
+            1,
+            conversationId
+        )
+
+        var messages: [ChatMessage] = []
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+
+            let rolePointer =
+                sqlite3_column_text(
+                    statement,
+                    1
+                )
+
+            let contentPointer =
+                sqlite3_column_text(
+                    statement,
+                    2
+                )
+
+            guard
+                let rolePointer = rolePointer,
+                let contentPointer = contentPointer
+            else {
+                continue
+            }
+
+            let role =
+                String(
+                    cString: rolePointer
+                )
+
+            let content =
+                String(
+                    cString: contentPointer
+                )
+
+            let messageRole: MessageRole
+
+            switch role {
+
+            case "user":
+                messageRole = .user
+
+            case "assistant":
+                messageRole = .assistant
+
+            default:
+                continue
+            }
+
+            messages.append(
+                ChatMessage(
+                    role: messageRole,
+                    text: content
+                )
+            )
+        }
+
+        print(
+            "MESSAGES_FETCHED: \(messages.count)"
+        )
+
+        return messages
+    }
+    
 }
